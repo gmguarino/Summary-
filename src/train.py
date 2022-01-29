@@ -50,8 +50,9 @@ class EncoderClassifier(pl.LightningModule):
         def _tokenize_dataset(dataset):
             dataset['input_ids'] = tokenizer.batch_encode_plus(
                 dataset['text'], 
-                max_length=self.max_seq_len, 
-                pad_to_max_length=True)['input_ids']
+                max_length=self.max_seq_len,
+                truncation=True,
+                padding=True)['input_ids']
             return dataset
         
         def _load_data(split):
@@ -63,7 +64,6 @@ class EncoderClassifier(pl.LightningModule):
             dataset = load_dataset("ccdv/arxiv-classification", split=f"{split}[:{dataset_length}")
             dataset = dataset.map(_tokenize_dataset, batched=True)
             dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'label'])
-            pdb.set_trace()
             
             return dataset
         
@@ -79,30 +79,30 @@ class EncoderClassifier(pl.LightningModule):
         accuracy = tm.functional.accuracy(logits, labels, num_classes=num_labels, average=average)
         precision = tm.functional.precision(logits, labels, num_classes=num_labels, average=average)
         recall = tm.functional.recall(logits, labels, num_classes=num_labels, average=average)
-        f1_score = tm.functional.f1(logits, labels, num_classes=num_labels, average=average)
+        f1_score = tm.functional.classification.f_beta.f1_score(logits, labels, num_classes=num_labels, average=average)
         return {f'{split}_accuracy':accuracy, f"{split}_precision":precision,f"{split}_recall":recall, f"{split}_f1_score":f1_score}
 
-    def training_step(self, batch):
-        pdb.set_trace()
+    def training_step(self, batch,batch_idx):
+        # pdb.set_trace()
         logits = self.forward(batch['input_ids'])
         loss = self.loss(logits, batch['label']).mean()
         return {
             'loss': loss, 
             'log': {
                 'train_loss': loss,
-                **EncoderClassifier.get_metrics(logits, batch["label"], self.args.num_labels, average="micro", split="train")
+                **EncoderClassifier.get_metrics(logits.detach(), batch["label"], self.args.num_labels, average="micro", split="train")
             }
         }
 
-    def validation_step(self, batch):
+    def validation_step(self, batch, batch_idx):
         with torch.no_grad():
-            logits = self.forward(batch['input_ids'], batch["attention_mask"])
+            logits = self.forward(batch['input_ids'])
         loss = self.loss(logits, batch['label']).mean()
         return {
             'loss': loss, 
             'log': {
                 'train_loss': loss,
-                **EncoderClassifier.get_metrics(logits, batch["label"], self.args.num_labels, average="micro", split="validation")
+                **EncoderClassifier.get_metrics(logits.detach(), batch["label"], self.args.num_labels, average="micro", split="validation")
             }
         }
 
