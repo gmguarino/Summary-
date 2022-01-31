@@ -52,7 +52,7 @@ class EncoderClassifier(pl.LightningModule):
                 dataset['text'], 
                 max_length=self.max_seq_len,
                 truncation=True,
-                padding=True)['input_ids']
+                padding="max_length")['input_ids']
             return dataset
         
         def _load_data(split):
@@ -107,9 +107,7 @@ class EncoderClassifier(pl.LightningModule):
         }
 
     def validation_epoch_end(self, outputs):
-        return outputs
-
-    
+        return outputs    
 
     def configure_optimizers(self):
         return torch.optim.SGD(
@@ -117,9 +115,6 @@ class EncoderClassifier(pl.LightningModule):
             lr=self.args.lr,
             momentum=self.args.momentum,
         )
-
-    def save_model(self):
-        pass
 
 
 def main(args):
@@ -134,12 +129,15 @@ def main(args):
     )
     trainer = pl.Trainer(
         default_root_dir='logs',
-        gpus=(torch.cuda.device_count() if torch.cuda.is_available() else 0),
+        gpus=args.n_gpus,
         max_epochs=args.epochs,
         fast_dev_run=args.debug,
-        logger=pl.loggers.TensorBoardLogger('logs/', name='clf', version=0)
+        logger=pl.loggers.TensorBoardLogger('logs/', name='clf', version=0),
+        strategy="ddp"
     )
     trainer.fit(model, datamodule=arxiv_dm)
+    if args.model_dir != "None":
+        trainer.save_checkpoint(os.path.join(args.model_dir, "model.ckpt"))
 
 
 if __name__=="__main__":
@@ -148,51 +146,57 @@ if __name__=="__main__":
         "--batch-size",
         type=int,
         default=32,
-        metavar="N",
-        help="input batch size for training (default: 64)",
+        help="input batch size for training (default: 32)"
     )
     parser.add_argument(
         "--epochs",
         type=int,
         default=10,
-        metavar="N",
-        help="number of epochs to train (default: 10)",
+        help="number of epochs to train (default: 10)"
     )
 
     parser.add_argument(
         "--max-len",
         type=int,
         default=256,
-        metavar="N",
-        help="Maximum sequence length of model inputs (default: 256)",
+        help="Maximum sequence length of model inputs (default: 256)"
     )
     parser.add_argument(
         "--debug", 
         type=bool, 
         default=False, 
-        metavar="Model", 
         help="Trains and validates on a single epoch if True (default: False)"
     )
     parser.add_argument(
-        "--lr", type=float, default=0.00009, metavar="LR", help="learning rate (default: 0.00009)"
+        "--lr", type=float, default=0.00009, help="learning rate (default: 0.00009)"
     )
     parser.add_argument(
-        "--momentum", type=float, default=0.5, metavar="M", help="SGD momentum (default: 0.5)"
+        "--momentum", type=float, default=0.5, help="SGD momentum (default: 0.5)"
     )
     parser.add_argument(
-        "--percent", type=float, default=5, metavar="Percent", help="Percentage of training dataset to load (default: 5)"
+        "--percent", type=float, default=5, help="Percentage of training dataset to load (default: 5)"
     )
 
     parser.add_argument(
-        "--model", type=str, default="bert-base-uncased", metavar="Model", help="default: bert-based-uncased"
+        "--model", type=str, default="bert-base-uncased", help="default: bert-based-uncased"
     )
     parser.add_argument(
-        "--cache-dir", type=str, default="../data", metavar="Cache", help=""
+        "--cache-dir", type=str, default="../data", help=""
     )
     parser.add_argument(
-        "--num-labels", type=int, default=11, metavar="N", help="default: 11"
+        "--num-labels", type=int, default=11, help="default: 11"
     )
+
+    # Data, model, and output directories
+    parser.add_argument("--model-dir", type=str, default=os.environ["SM_MODEL_DIR"])
+    parser.add_argument("--n_gpus", type=str, default=os.environ["SM_NUM_GPUS"])
+
 
     args = parser.parse_args()
+    try:
+        sh.rm('-r', '-f', args.cache_dir)
+    except FileNotFoundError:
+        logger.warning(f"No such file or directory '{args.cache_dir}', skipping removal.")
+    sh.mkdir(args.cache_dir)
 
     main(args)
